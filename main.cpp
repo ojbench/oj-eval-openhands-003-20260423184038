@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <map>
 #include <algorithm>
 #include <sstream>
@@ -24,7 +25,7 @@ struct ProblemStatus {
 
 struct Team {
     string name;
-    map<string, ProblemStatus> problems;
+    unordered_map<string, ProblemStatus> problems;
     vector<Submission> submissions;
     int solvedCount = 0;
     int penaltyTime = 0;
@@ -70,7 +71,7 @@ struct Team {
 
 class ICPCSystem {
 private:
-    map<string, Team> teams;
+    unordered_map<string, Team> teams;
     vector<string> teamOrder;
     bool started = false;
     bool frozen = false;
