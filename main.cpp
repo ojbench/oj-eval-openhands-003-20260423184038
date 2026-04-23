@@ -35,17 +35,19 @@ struct Team {
         solvedCount = 0;
         penaltyTime = 0;
         solveTimes.clear();
+        solveTimes.reserve(problemList.size());
         
         for (const auto& prob : problemList) {
             auto it = problems.find(prob);
             if (it != problems.end() && it->second.solved && !it->second.frozen) {
                 solvedCount++;
-                int penalty = 20 * it->second.wrongAttempts + it->second.solveTime;
-                penaltyTime += penalty;
+                penaltyTime += 20 * it->second.wrongAttempts + it->second.solveTime;
                 solveTimes.push_back(it->second.solveTime);
             }
         }
-        sort(solveTimes.rbegin(), solveTimes.rend());
+        if (!solveTimes.empty()) {
+            sort(solveTimes.rbegin(), solveTimes.rend());
+        }
     }
     
     bool hasFrozenProblems() const {
@@ -98,13 +100,54 @@ private:
         }
         
         rankedTeams.clear();
+        rankedTeams.reserve(teams.size());
         for (const auto& t : teams) {
             rankedTeams.push_back(t.first);
         }
         
-        sort(rankedTeams.begin(), rankedTeams.end(), [this](const string& a, const string& b) {
-            return compareTeams(teams[a], teams[b]);
-        });
+        auto cmp = [this](const string& a, const string& b) {
+            const Team& ta = teams[a];
+            const Team& tb = teams[b];
+            if (ta.solvedCount != tb.solvedCount) return ta.solvedCount > tb.solvedCount;
+            if (ta.penaltyTime != tb.penaltyTime) return ta.penaltyTime < tb.penaltyTime;
+            
+            size_t minSize = min(ta.solveTimes.size(), tb.solveTimes.size());
+            for (size_t i = 0; i < minSize; i++) {
+                if (ta.solveTimes[i] != tb.solveTimes[i]) {
+                    return ta.solveTimes[i] < tb.solveTimes[i];
+                }
+            }
+            
+            return ta.name < tb.name;
+        };
+        
+        sort(rankedTeams.begin(), rankedTeams.end(), cmp);
+        
+        for (size_t i = 0; i < rankedTeams.size(); i++) {
+            teams[rankedTeams[i]].ranking = i + 1;
+        }
+    }
+    
+    void updateOneTeamAndResort(const string& teamName) {
+        teams[teamName].updateStats(problemList);
+        
+        auto cmp = [this](const string& a, const string& b) {
+            const Team& ta = teams[a];
+            const Team& tb = teams[b];
+            if (ta.solvedCount != tb.solvedCount) return ta.solvedCount > tb.solvedCount;
+            if (ta.penaltyTime != tb.penaltyTime) return ta.penaltyTime < tb.penaltyTime;
+            
+            size_t minSize = min(ta.solveTimes.size(), tb.solveTimes.size());
+            for (size_t i = 0; i < minSize; i++) {
+                if (ta.solveTimes[i] != tb.solveTimes[i]) {
+                    return ta.solveTimes[i] < tb.solveTimes[i];
+                }
+            }
+            
+            return ta.name < tb.name;
+        };
+        
+        sort(rankedTeams.begin(), rankedTeams.end(), cmp);
         
         for (size_t i = 0; i < rankedTeams.size(); i++) {
             teams[rankedTeams[i]].ranking = i + 1;
@@ -217,52 +260,73 @@ public:
         updateRankings();
         printScoreboard();
         
-        while (true) {
-            bool found = false;
-            for (int i = rankedTeams.size() - 1; i >= 0; i--) {
-                Team& team = teams[rankedTeams[i]];
-                if (team.hasFrozenProblems()) {
-                    string prob = team.getSmallestFrozenProblem(problemList);
-                    if (!prob.empty()) {
-                        int oldRank = team.ranking;
-                        string teamName = team.name;
-                        
-                        ProblemStatus& ps = team.problems[prob];
-                        ps.frozen = false;
-                        
-                        // Replay frozen submissions
-                        for (const auto& sub : ps.frozenSubs) {
-                            if (!ps.solved) {
-                                if (sub.status == "Accepted") {
-                                    ps.solved = true;
-                                    ps.solveTime = sub.time;
-                                } else {
-                                    ps.wrongAttempts++;
-                                }
-                            }
-                        }
-                        ps.frozenSubs.clear();
-                        ps.frozenSubmissions = 0;
-                        
-                        // Save the old ranking list before update
-                        vector<string> oldRankedTeams = rankedTeams;
-                        
-                        updateRankings();
-                        
-                        int newRank = teams[teamName].ranking;
-                        if (newRank < oldRank) {
-                            // Find the team that was at the NEW position in the OLD ranking
-                            string replacedTeam = oldRankedTeams[newRank - 1];
-                            cout << teamName << " " << replacedTeam << " " 
-                                 << teams[teamName].solvedCount << " " << teams[teamName].penaltyTime << "\n";
-                        }
-                        
-                        found = true;
-                        break;
+        // Build list of teams with frozen problems for efficiency
+        vector<string> teamsWithFrozen;
+        for (const auto& teamName : rankedTeams) {
+            if (teams[teamName].hasFrozenProblems()) {
+                teamsWithFrozen.push_back(teamName);
+            }
+        }
+        
+        while (!teamsWithFrozen.empty()) {
+            // Find the lowest ranked team with frozen problems
+            string lowestTeam = "";
+            int lowestRank = -1;
+            
+            for (const auto& teamName : teamsWithFrozen) {
+                int rank = teams[teamName].ranking;
+                if (rank > lowestRank) {
+                    lowestRank = rank;
+                    lowestTeam = teamName;
+                }
+            }
+            
+            if (lowestTeam.empty()) break;
+            
+            Team& team = teams[lowestTeam];
+            string prob = team.getSmallestFrozenProblem(problemList);
+            if (prob.empty()) {
+                // Remove this team from the list
+                teamsWithFrozen.erase(remove(teamsWithFrozen.begin(), teamsWithFrozen.end(), lowestTeam), teamsWithFrozen.end());
+                continue;
+            }
+            
+            int oldRank = team.ranking;
+            
+            ProblemStatus& ps = team.problems[prob];
+            ps.frozen = false;
+            
+            // Replay frozen submissions
+            for (const auto& sub : ps.frozenSubs) {
+                if (!ps.solved) {
+                    if (sub.status == "Accepted") {
+                        ps.solved = true;
+                        ps.solveTime = sub.time;
+                    } else {
+                        ps.wrongAttempts++;
                     }
                 }
             }
-            if (!found) break;
+            ps.frozenSubs.clear();
+            ps.frozenSubmissions = 0;
+            
+            // Check if this team still has frozen problems
+            if (!team.hasFrozenProblems()) {
+                teamsWithFrozen.erase(remove(teamsWithFrozen.begin(), teamsWithFrozen.end(), lowestTeam), teamsWithFrozen.end());
+            }
+            
+            // Save the old ranking list before update
+            vector<string> oldRankedTeams = rankedTeams;
+            
+            updateOneTeamAndResort(lowestTeam);
+            
+            int newRank = teams[lowestTeam].ranking;
+            if (newRank < oldRank) {
+                // Find the team that was at the NEW position in the OLD ranking
+                string replacedTeam = oldRankedTeams[newRank - 1];
+                cout << lowestTeam << " " << replacedTeam << " " 
+                     << teams[lowestTeam].solvedCount << " " << teams[lowestTeam].penaltyTime << "\n";
+            }
         }
         
         printScoreboard();
