@@ -244,14 +244,15 @@ public:
                         ps.frozenSubs.clear();
                         ps.frozenSubmissions = 0;
                         
+                        // Save the old ranking list before update
+                        vector<string> oldRankedTeams = rankedTeams;
+                        
                         updateRankings();
                         
                         int newRank = teams[teamName].ranking;
                         if (newRank < oldRank) {
-                            // team_name2 is the team that was at the NEW position before the move
-                            // After updateRankings, rankedTeams[newRank-1] is the current team
-                            // We need to find the team that was pushed down
-                            string replacedTeam = rankedTeams[newRank]; // This is the team now at position newRank+1
+                            // Find the team that was at the NEW position in the OLD ranking
+                            string replacedTeam = oldRankedTeams[newRank - 1];
                             cout << teamName << " " << replacedTeam << " " 
                                  << teams[teamName].solvedCount << " " << teams[teamName].penaltyTime << "\n";
                         }
